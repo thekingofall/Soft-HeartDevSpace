@@ -41,7 +41,7 @@ class ConfigTests(Fixture):
         self.manager.save(changed)
         self.assertEqual(first, self.manager.owner_password())
         self.assertNotIn(first, json.dumps(self.manager.snapshot()))
-        self.assertEqual(read_json(self.manager.home / "devspace/config.json")["allowedRoots"], [str(self.project)])
+        self.assertEqual(read_json(self.manager.home / "devspace/config.json")["allowedRoots"], [str(self.project.resolve())])
 
     def test_reject_missing_directory_without_mutation(self):
         original = dict(self.manager.settings)
