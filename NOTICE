@@ -1,0 +1,24 @@
+Soft-HeartDevSpace is independently maintained by thekingofall.
+ChatGPT, OpenAI, Cloudflare, Windows, Node.js, and Git are the names or marks
+of their respective owners. No affiliation or endorsement is implied.
+
+External runtime tools, installed separately:
+- DevSpace / @waishnav/devspace 1.0.8: https://github.com/Waishnav/DevSpace
+- cloudflared: https://github.com/cloudflare/cloudflared
+- Node.js: https://nodejs.org
+- Git for Windows: https://gitforwindows.org
+Their licenses apply to their respective distributions.
+
+Windows release packaging uses Python and PyInstaller. Python license
+materials are included with the bundled runtime. PyInstaller's bootloader
+exception permits distribution of bundled applications under their own license.
+https://www.python.org/psf/license/
+https://pyinstaller.org/en/stable/license.html
+
+The bundled Python runtime also includes OpenSSL and libffi. Their license
+texts are provided in docs/licenses. PYTHON-LICENSE.txt accompanies the
+Windows application and includes Python's bundled third-party notices.
+
+The connection diagram is original artwork created for this project.
+Its panel layout and palette are inspired by the author's public project:
+https://github.com/thekingofall/scFetallife_Blood
