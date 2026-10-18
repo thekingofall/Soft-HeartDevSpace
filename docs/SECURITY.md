@@ -29,3 +29,6 @@ The application preserves the Owner password across normal settings changes. Res
 For a security concern, use the repository's private vulnerability reporting option when it is available. For an ordinary bug, open a GitHub issue with the app version, Windows version, and a sanitized description. Share short relevant log excerpts. Remove passwords, authorization headers, tunnel credentials, hostnames, and personal paths.
 
 反馈故障时，请提供版本、系统环境和经过清理的错误摘要。公开 issue 中请清除密码、授权信息、隧道凭据以及私人路径。仓库启用私密漏洞报告时，安全问题可通过该入口提交。
+# FRP relay
+
+FRP and dual mode add your relay operator to the data path. The HTTPS gateway handles decrypted MCP traffic and credentials in transit. Keep certificate keys and STCP configuration private, bind the visitor to loopback, and retain OAuth at DevSpace. TLS encryption is enabled in the templates; verified FRPS identity requires your trusted CA configuration. Gateway examples disable request access logs and automatic replay of MCP requests. See [FRP setup](FRP.md).

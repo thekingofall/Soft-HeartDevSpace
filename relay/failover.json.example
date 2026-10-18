@@ -1,0 +1,11 @@
+{
+  "route_file": "/etc/soft-heartdevspace/active-route.conf",
+  "state_file": "/etc/soft-heartdevspace/route-state.json",
+  "ports": {"cloudflare": 17678, "frp": 17677},
+  "health_urls": {
+    "cloudflare": "http://127.0.0.1:17678/healthz",
+    "frp": "http://127.0.0.1:17677/healthz"
+  },
+  "validate_command": ["/usr/sbin/nginx", "-t"],
+  "reload_command": ["systemctl", "reload", "nginx"]
+}

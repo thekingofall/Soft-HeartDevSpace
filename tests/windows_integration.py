@@ -65,7 +65,7 @@ def run(home):
         print("PASS: existing OAuth access remains usable after recovery", flush=True)
         task = hidden_run([powershell(), "-NoProfile", "-Command",
                            f"$t=Get-ScheduledTask -TaskName '{manager.task_name}'; $t | Export-ScheduledTask"])
-        assert "wscript.exe" in task and "PT1M" in task and "<Hidden>true</Hidden>" in task
+        assert "quiet-launcher-" in task and "PT1M" in task and "<Hidden>true</Hidden>" in task
         print("PASS: hidden task, staggered triggers and user-logon startup", flush=True)
         manager.perform("remove_autostart")
         assert status().get("paused") is True

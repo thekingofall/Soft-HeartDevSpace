@@ -23,3 +23,11 @@ Set-DevSpaceEnvironment ([pscustomobject]@{config_dir='fixture-config';state_dir
 if ($env:DEVSPACE_OAUTH_OWNER_TOKEN -or $env:DEVSPACE_ALLOWED_ROOTS -or $env:DEVSPACE_PORT) { throw 'Inherited settings leaked into app-managed service.' }
 if ($env:DEVSPACE_CONFIG_DIR -ne 'fixture-config' -or $env:DEVSPACE_STATE_DIR -ne 'fixture-state') { throw 'App configuration was not selected.' }
 Write-Output 'PASS: inherited configuration isolation'
+if (-not (Test-FrpCommand 'frpc.exe -c "C:\data\frpc.toml"' 'C:\data\frpc.toml')) { throw 'Quoted FRP config not matched' }
+if (-not (Test-FrpCommand 'frpc.exe -c C:\data\frpc.toml' 'C:\data\frpc.toml')) { throw 'Unquoted FRP config not matched' }
+if (Test-FrpCommand 'frpc.exe -c C:\data\frpc.toml.other' 'C:\data\frpc.toml') { throw 'Another FRP config matched' }
+if (Test-FrpCommand 'frpc.exe -c C:\elsewhere\frpc.toml' 'C:\data\frpc.toml') { throw 'Unrelated FRP matched' }
+Write-Output 'PASS: FRP process identity'
+if ((Get-RecoveryDecision 1 $false 20 900 900 $true) -ne 'Deferred') { throw 'Pending gateway restarted an existing FRP process' }
+if ((Get-RecoveryDecision 0 $false 0 0 900 $true) -ne 'Start') { throw 'Pending gateway failed to recover an absent FRP process' }
+Write-Output 'PASS: pending gateway process recovery'

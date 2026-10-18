@@ -6,12 +6,13 @@ $ErrorActionPreference = 'Stop'
 
 function Get-RecoveryDecision {
     param([int]$ProcessCount, [bool]$Healthy, [int]$Failures,
-          [double]$AgeSeconds, [double]$SinceRecoverySeconds)
+          [double]$AgeSeconds, [double]$SinceRecoverySeconds, [bool]$HealthDeferred = $false)
     if ($ProcessCount -gt 1) { return 'Duplicate' }
     if ($ProcessCount -eq 0) {
         if ($SinceRecoverySeconds -lt 60) { return 'Wait' }
         return 'Start'
     }
+    if ($HealthDeferred) { return 'Deferred' }
     if ($Healthy) { return 'Healthy' }
     if ($AgeSeconds -lt 180) { return 'Starting' }
     if ($Failures -ge 3 -and $SinceRecoverySeconds -ge 300) { return 'Restart' }
@@ -38,6 +39,40 @@ function Set-DevSpaceEnvironment($Settings) {
     $env:DEVSPACE_TOOL_MODE = 'full'
 }
 
+function Test-FrpCommand([string]$CommandLine, [string]$ConfigFile) {
+    if (-not $ConfigFile) { return $false }
+    $escaped = [regex]::Escape($ConfigFile)
+    return ($CommandLine -match ('(?:^|\s)-c\s+(?:"' + $escaped + '"|' + $escaped + ')(?:\s|$)'))
+}
+
+function ConvertTo-ProcessArgument([string]$Value) {
+    return '"' + ([regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1')) + '"'
+}
+
+function Start-QuietService([string]$Executable, [string]$Arguments, [string]$WorkingDirectory, [string]$OutputPath, [string]$ErrorPath) {
+    if (-not ('HeartStdHandles' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HeartStdHandles {
+    [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll")] static extern bool SetHandleInformation(IntPtr h, uint mask, uint flags);
+    public static void Detach() { foreach (int kind in new int[]{-10,-11,-12}) SetHandleInformation(GetStdHandle(kind), 1, 0); }
+}
+'@
+    }
+    [HeartStdHandles]::Detach()
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = [string]$dsSettings.quiet_launcher
+    $start.Arguments = (@($Executable,$Arguments,$WorkingDirectory,$OutputPath,$ErrorPath,'job') | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join ' '
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    # Detach the long-lived host from the heartbeat task's output pipes.
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    return [System.Diagnostics.Process]::Start($start)
+}
+
 if ($LibraryOnly) { return }
 if (-not $ConfigPath) { throw 'ConfigPath is required.' }
 $dsSettings = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -46,6 +81,13 @@ $dsNode = [string]$dsSettings.node_path
 $dsGitBashDir = $(if ($dsSettings.bash_path) { Split-Path -Parent ([string]$dsSettings.bash_path) } else { '' })
 $dsCli = [string]$dsSettings.devspace_cli
 $dsCloudflared = [string]$dsSettings.cloudflared_path
+$dsFrpc = [string]$dsSettings.frpc_path
+$dsFrpcConfig = [string]$dsSettings.frpc_config
+$dsMode = $(if ($dsSettings.connection_mode) { [string]$dsSettings.connection_mode } else { 'cloudflare' })
+$dsComponents = @('node')
+if ($dsSettings.external_engine) { $dsComponents = @() }
+if ($dsMode -ne 'frp') { $dsComponents += 'tunnel' }
+if ($dsMode -ne 'cloudflare') { $dsComponents += 'frp' }
 $dsConfigPath = Join-Path $dsSettings.config_dir 'config.json'
 $dsTunnelConfig = [string]$dsSettings.tunnel_config
 $dsStatePath = Join-Path $dsLogDir 'state.json'
@@ -77,6 +119,11 @@ function Get-ManagedProcess([string]$Component) {
             $_.ExecutablePath -eq $dsNode -and $_.CommandLine -and
             $_.CommandLine.Contains($dsCli) -and $_.CommandLine.Contains('--title=' + $dsProcessTitle) -and $_.CommandLine -match '\bserve\b'
         }
+    } elseif ($Component -eq 'frp') {
+        if (-not $dsFrpc -or -not $dsFrpcConfig) { return }
+        Get-CimInstance Win32_Process -Filter "Name='frpc.exe'" | Where-Object {
+            $_.ExecutablePath -eq $dsFrpc -and (Test-FrpCommand $_.CommandLine $dsFrpcConfig)
+        }
     } else {
         Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | Where-Object {
             $_.ExecutablePath -eq $dsCloudflared -and $_.CommandLine -and
@@ -107,7 +154,9 @@ function Test-Health([string]$Url, [bool]$IsTunnel = $false, [bool]$UseProxy = $
                 else { $valid = ($json.ok -eq $true -and $json.name -eq 'devspace') }
             } catch { $valid = $false }
         }
-        return @{healthy=$valid; httpStatus=$code}
+        $transport = ''
+        if ($response.Headers.Contains('X-Heart-Transport')) { $transport = [string](@($response.Headers.GetValues('X-Heart-Transport'))[0]) }
+        return @{healthy=$valid; httpStatus=$code; transport=$transport}
     } catch { return @{healthy=$false; httpStatus=0} }
     finally {
         if ($null -ne $response) { $response.Dispose() }
@@ -120,6 +169,11 @@ function Get-SinceRecovery([string]$Stamp) {
     return ([DateTime]::UtcNow - [DateTime]::Parse($Stamp).ToUniversalTime()).TotalSeconds
 }
 function Invoke-Recovery([string]$Component, [string]$Action, [string]$Reason) {
+    if ($Component -eq 'frp') {
+        foreach ($requiredFile in @($dsFrpc, $dsFrpcConfig, [string]$dsSettings.quiet_launcher)) {
+            if (-not $requiredFile -or -not [IO.File]::Exists($requiredFile)) { throw "FRP runtime file missing: $requiredFile" }
+        }
+    }
     $current = @(Get-ManagedProcess $Component)
     if ($current.Count -gt 1) { throw "Multiple matching $Component processes; recovery deferred." }
     if ($Action -eq 'Start' -and $current.Count -gt 0) { return }
@@ -148,14 +202,18 @@ function Invoke-Recovery([string]$Component, [string]$Action, [string]$Reason) {
         $env:Path = $dsGitBashDir + ';' + (Split-Path -Parent $dsNode) + ';' + $env:Path
         Rotate-Log (Join-Path $dsLogDir 'devspace.log')
         Rotate-Log (Join-Path $dsLogDir 'devspace.err')
-        $started = Start-Process -FilePath $dsNode -ArgumentList ('--title={0} "{1}" serve' -f $dsProcessTitle, $dsCli) -WorkingDirectory $workdir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dsLogDir 'devspace.log') -RedirectStandardError (Join-Path $dsLogDir 'devspace.err') -PassThru
+        $started = Start-QuietService $dsNode ('--title={0} "{1}" serve' -f $dsProcessTitle, $dsCli) $workdir (Join-Path $dsLogDir 'devspace.log') (Join-Path $dsLogDir 'devspace.err')
+    } elseif ($Component -eq 'frp') {
+        Rotate-Log (Join-Path $dsLogDir 'frpc.log')
+        Rotate-Log (Join-Path $dsLogDir 'frpc.err')
+        $started = Start-QuietService $dsFrpc ('-c "{0}"' -f $dsFrpcConfig) $dsLogDir (Join-Path $dsLogDir 'frpc.log') (Join-Path $dsLogDir 'frpc.err')
     } else {
         foreach ($path in @($dsCloudflared, $dsTunnelConfig)) {
             if (-not (Test-Path -LiteralPath $path)) { throw "Required tunnel path missing: $path" }
         }
         Rotate-Log (Join-Path $dsLogDir 'cf-local.log')
         Rotate-Log (Join-Path $dsLogDir 'cf-local.err')
-        $started = Start-Process -FilePath $dsCloudflared -ArgumentList ('--config "{0}" tunnel --metrics 127.0.0.1:{2} run {1}' -f $dsTunnelConfig, $dsTunnelName, $dsSettings.metrics_port) -WorkingDirectory $dsLogDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $dsLogDir 'cf-local.log') -RedirectStandardError (Join-Path $dsLogDir 'cf-local.err') -PassThru
+        $started = Start-QuietService $dsCloudflared ('--config "{0}" tunnel --metrics 127.0.0.1:{2} run {1}' -f $dsTunnelConfig, $dsTunnelName, $dsSettings.metrics_port) $dsLogDir (Join-Path $dsLogDir 'cf-local.log') (Join-Path $dsLogDir 'cf-local.err')
     }
     $dsState[$Component + 'Failures'] = 0
     if ($Component -eq 'tunnel') { $dsState.publicFailures = 0 }
@@ -168,7 +226,7 @@ try {
     if (-not $dsLocked) { if ($ManualStop) { throw 'Heartbeat busy. Try Stop again.' }; exit 0 }
     New-Item -ItemType Directory -Path $dsLogDir -Force | Out-Null
     if ($ManualStop) {
-        foreach ($component in @('node','tunnel')) {
+        foreach ($component in $dsComponents) {
             foreach ($observed in @(Get-ManagedProcess $component)) {
                 $confirmed = @(Get-ManagedProcess $component | Where-Object { $_.ProcessId -eq $observed.ProcessId -and $_.CreationDate -eq $observed.CreationDate })
                 if ($confirmed.Count -eq 1) { Stop-Process -Id $observed.ProcessId -Force -ErrorAction Stop }
@@ -181,8 +239,8 @@ try {
     if (-not $dsSettings.enabled) { exit 0 }
     Add-Type -AssemblyName System.Net.Http
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $dsState = @{nodeFailures=0; tunnelFailures=0; publicFailures=0;
-        nodeLastRecoveryUtc=''; tunnelLastRecoveryUtc=''; lastSummary='';
+    $dsState = @{nodeFailures=0; tunnelFailures=0; frpFailures=0; publicFailures=0;
+        nodeLastRecoveryUtc=''; tunnelLastRecoveryUtc=''; frpLastRecoveryUtc=''; lastSummary='';
         heartbeatCount=0; lastHealthyUtc=''}
     if (Test-Path -LiteralPath $dsStatePath) {
         try {
@@ -194,27 +252,38 @@ try {
     }
     $nodeProcesses = @(Get-ManagedProcess 'node')
     $tunnelProcesses = @(Get-ManagedProcess 'tunnel')
+    $frpProcesses = @(Get-ManagedProcess 'frp')
     $localHealth = Test-Health ('http://127.0.0.1:{0}/healthz' -f $dsSettings.port)
-    $tunnelHealth = Test-Health ('http://127.0.0.1:{0}/ready' -f $dsSettings.metrics_port) $true
+    $tunnelHealth = @{healthy=$false; disabled=$true}
+    if ($dsMode -ne 'frp') { $tunnelHealth = Test-Health ('http://127.0.0.1:{0}/ready' -f $dsSettings.metrics_port) $true }
     $config = Get-Content -LiteralPath $dsConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $publicUrl = ([string]$config.publicBaseUrl).TrimEnd('/') + '/healthz'
     $publicHealth = Test-Health $publicUrl $false $true
+    $frpHealth = @{healthy=$false; disabled=$true}
+    if ($dsMode -ne 'cloudflare' -and $dsSettings.frp_health_pending) {
+        $frpHealth = @{healthy=$false; deferred=$true}
+    } elseif ($dsMode -ne 'cloudflare') {
+        $frpUrl = ([string]$config.publicBaseUrl).TrimEnd('/') + '/_heart/frp-health'
+        $frpHealth = Test-Health $frpUrl $false $true
+    }
     $dsState.heartbeatCount = [long]$dsState.heartbeatCount + 1
-    if ($localHealth.healthy -and $tunnelHealth.healthy -and $publicHealth.healthy) {
+    if ($localHealth.healthy -and ($tunnelHealth.healthy -or $frpHealth.healthy) -and $publicHealth.healthy) {
         $dsState.lastHealthyUtc = [DateTime]::UtcNow.ToString('o')
     }
     $dsState.nodeFailures = $(if ($localHealth.healthy) { 0 } else { [int]$dsState.nodeFailures + 1 })
-    $dsState.tunnelFailures = $(if ($tunnelHealth.healthy) { 0 } else { [int]$dsState.tunnelFailures + 1 })
+    $dsState.tunnelFailures = $(if ($tunnelHealth.healthy -or $tunnelHealth.disabled) { 0 } else { [int]$dsState.tunnelFailures + 1 })
+    $dsState.frpFailures = $(if ($frpHealth.healthy -or $frpHealth.deferred -or $frpHealth.disabled -or -not $localHealth.healthy) { 0 } else { [int]$dsState.frpFailures + 1 })
     $dsState.publicFailures = $(if ($publicHealth.healthy -or -not $localHealth.healthy -or -not $tunnelHealth.healthy) { 0 } else { [int]$dsState.publicFailures + 1 })
     $decisions = @{}
-    foreach ($component in @('node','tunnel')) {
+    foreach ($component in $dsComponents) {
         if ($component -eq 'node') { $processes = @($nodeProcesses) }
+        elseif ($component -eq 'frp') { $processes = @($frpProcesses) }
         else { $processes = @($tunnelProcesses) }
-        $health = $(if ($component -eq 'node') { $localHealth } else { $tunnelHealth })
+        $health = $(if ($component -eq 'node') { $localHealth } elseif ($component -eq 'frp') { $frpHealth } else { $tunnelHealth })
         $age = 0
         if ($processes.Count -eq 1) { $age = ([DateTime]::Now - $processes[0].CreationDate).TotalSeconds }
         $since = Get-SinceRecovery $dsState[$component + 'LastRecoveryUtc']
-        $decision = Get-RecoveryDecision $processes.Count $health.healthy $dsState[$component + 'Failures'] $age $since
+        $decision = Get-RecoveryDecision $processes.Count $health.healthy $dsState[$component + 'Failures'] $age $since ([bool]$health.deferred)
         $reason = 'process absent or repeated health failure'
         if ($component -eq 'tunnel' -and $decision -eq 'Healthy' -and
             (Get-PublicRecoveryDecision $localHealth.healthy $tunnelHealth.healthy $dsState.publicFailures $publicHealth.httpStatus $since)) {
@@ -224,13 +293,14 @@ try {
         $decisions[$component] = $decision
         if ($decision -in @('Start','Restart')) { Invoke-Recovery $component $decision $reason }
     }
-    $summary = 'local={0}; tunnel={1}; public={2}; nodeAction={3}; tunnelAction={4}' -f $localHealth.healthy,$tunnelHealth.healthy,$publicHealth.healthy,$decisions.node,$decisions.tunnel
+    $summary = 'local={0}; tunnel={1}; frp={2}; public={3}; route={4}; nodeAction={5}; tunnelAction={6}; frpAction={7}' -f $localHealth.healthy,$tunnelHealth.healthy,$frpHealth.healthy,$publicHealth.healthy,$publicHealth.transport,$decisions.node,$decisions.tunnel,$decisions.frp
     Write-WatchLog ('Heartbeat #{0}: {1}' -f $dsState.heartbeatCount, $summary)
     $dsState.lastSummary = $summary
     Write-JsonAtomic @{checkedAtUtc=[DateTime]::UtcNow.ToString('o'); checkIntervalSeconds=30;
-        local=$localHealth; tunnel=$tunnelHealth; public=$publicHealth; decisions=$decisions;
+        local=$localHealth; tunnel=$tunnelHealth; frp=$frpHealth; public=$publicHealth; decisions=$decisions;
         nodePids=@(Get-ManagedProcess 'node' | ForEach-Object {$_.ProcessId});
         tunnelPids=@(Get-ManagedProcess 'tunnel' | ForEach-Object {$_.ProcessId});
+        frpPids=@(Get-ManagedProcess 'frp' | ForEach-Object {$_.ProcessId});
         state=$dsState} $dsStatusPath
 } catch {
     try { Write-WatchLog ('Check failed: ' + $_.Exception.Message) } catch {}

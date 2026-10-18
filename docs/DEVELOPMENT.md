@@ -31,6 +31,9 @@ python launch.py --home D:\AppTests\HeartDevSpace
 | `heartdevspace/web/` | English / Chinese user interface |
 | `heartdevspace/runtime/control.ps1` | Hidden scheduled task installation and removal |
 | `heartdevspace/runtime/watch.ps1` | Health checks, process identity, recovery policy, logs |
+| `heartdevspace/runtime/quiet-launcher.cs` | Windowless process host, log capture, child-process cleanup |
+| `relay/` | HTTPS gateway, STCP templates, Linux health checker and systemd units |
+| `tests/test_failover.py` | Route selection, recovery hold, reload rollback and crash recovery |
 | `tests/test_core.py` | Configuration and HTTP boundary tests |
 | `tests/test_recovery.ps1` | Recovery thresholds, cooldowns, duplicate processes |
 | `tests/windows_integration.py` | Opt-in real-engine recovery and task lifecycle test |
@@ -39,6 +42,10 @@ python launch.py --home D:\AppTests\HeartDevSpace
 The heartbeat runs as a bounded task. Two repeating one-minute triggers are offset by 30 seconds; a mutex serializes checks. Each HTTP probe has an eight-second timeout. Task execution is capped at two minutes. Startup uses the signed-in user's identity and limited run level.
 
 Managed processes are identified by executable path plus an instance-specific marker or tunnel configuration path. Stop and recovery operate on matching processes. DevSpace uses a persistent app-owned configuration and state directory, so restarts retain OAuth state.
+
+The .NET Framework compiler builds a small windowless host in the private runtime directory. Its filename contains a source hash, so existing hosts can continue through upgrades. Services use `CreateNoWindow` and a Windows job with `KILL_ON_JOB_CLOSE`. The heartbeat detaches its output handles before creating persistent service hosts. Scheduled tasks retain the worker exit code. This requires the Windows .NET Framework 4.x compiler.
+
+The optional `external_engine` runtime field supports an existing DevSpace deployment managed by another watchdog. It suppresses engine start/stop; the deployment adapter must supply that engine's existing configuration directory. The normal dashboard manages its own engine and configuration.
 
 The worker clears inherited `DEVSPACE_*` variables in its own process before selecting the app's configuration. This keeps credentials, ports, and roots from an older installation from overriding the control panel's settings. Windows user and system environment settings remain intact.
 
@@ -54,9 +61,12 @@ The optional Windows integration test creates a temporary scheduled task and rem
 
 ```powershell
 python -m tests.windows_integration --home D:\AppTests\heart-integration-01
+python -m tests.windows_quiet --home D:\AppTests\heart-quiet-01
 ```
 
 This test runs the real DevSpace service with a local cloudflared readiness fixture, completes local OAuth and an authenticated file read, terminates the test service, waits for scheduled recovery, reuses its existing authorization, and checks stop/task removal. The fixture creates no public tunnel or DNS record. Customer-account Cloudflare provisioning and ChatGPT OAuth completion require validation in the customer's actual account.
+
+The quiet-launcher test checks that both the managed process and its child have no console, that exit codes propagate, and that the child exits when its managed parent is terminated.
 
 Windows 集成测试会实际启动 DevSpace，并通过结束测试进程检查自动恢复。Cloudflare 就绪状态由本地测试程序提供；真实域名的创建和 ChatGPT 账户授权，需要在相应账户中完成验证。
 
@@ -70,7 +80,7 @@ python -m venv .venv
 .\scripts\build_windows.ps1 -Python .venv\Scripts\python.exe -BuildRoot D:\BuildTemp\Soft-HeartDevSpace
 ```
 
-The output in `dist` includes a portable folder, a versioned ZIP, and `SHA256SUMS.txt`. The app uses PyInstaller's windowed launcher. User configuration is stored outside the release folder. Version 0.1.0 Windows binaries are unsigned.
+The output in `dist` includes a portable folder, a versioned ZIP, and `SHA256SUMS.txt`. The app uses PyInstaller's windowed launcher. User configuration is stored outside the release folder. Version 0.2.0 Windows binaries are unsigned.
 
 Check the compiled application with a new disposable home directory:
 

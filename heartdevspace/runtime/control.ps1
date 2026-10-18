@@ -16,13 +16,15 @@ if ($Action -in @('Stop','Remove')) {
 if ($Action -eq 'Check') { & $worker -ConfigPath $ConfigPath; exit $LASTEXITCODE }
 
 $runtime = $PSScriptRoot
-$launcher = Join-Path $runtime 'launch.vbs'
-$command = '"' + $env:SystemRoot + '\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $worker + '" -ConfigPath "' + $ConfigPath + '"'
-$quoted = $command.Replace('"','""')
-$vbs = "Option Explicit`r`nDim runner, result`r`nSet runner = CreateObject(""WScript.Shell"")`r`nresult = runner.Run(""$quoted"", 0, True)`r`nWScript.Quit result`r`n"
-Set-Content -LiteralPath $launcher -Value $vbs -Encoding Unicode
+. $worker -ConfigPath $ConfigPath -LibraryOnly
+$launcher = [string]$settings.quiet_launcher
+if (-not (Test-Path -LiteralPath $launcher)) { throw 'Windowless launcher is missing. Reopen the app.' }
+$logDir = [string]$settings.log_dir
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$command = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $worker + '" -ConfigPath "' + $ConfigPath + '"'
+$arguments = (@((Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'), $command, $runtime, (Join-Path $logDir 'launcher.log'), (Join-Path $logDir 'launcher.err'), 'worker') | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join ' '
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$actionDef = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\wscript.exe') -Argument ('//B //NoLogo "{0}"' -f $launcher) -WorkingDirectory $runtime
+$actionDef = New-ScheduledTaskAction -Execute $launcher -Argument $arguments -WorkingDirectory $runtime
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
 $logon.Delay = 'PT20S'
 $first = (Get-Date).AddSeconds(10)

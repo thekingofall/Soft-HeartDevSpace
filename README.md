@@ -39,6 +39,8 @@ Use it to let ChatGPT inspect a codebase, edit project files, or run development
 
 ## Before you begin
 
+Version **0.2.0** adds FRP and dual transport. With your own HTTPS relay, Cloudflare and a private FRP route can share one ChatGPT address and switch automatically after repeated health failures. The control panel shows the active route. Follow the [FRP setup guide](docs/FRP.md) for server templates, certificate setup, DNS, and recovery behavior. The Cloudflare-only walkthrough continues below.
+
 You need **Windows 10/11 x64**, **Node.js 24 LTS**, **Git for Windows**, **cloudflared**, and a domain whose DNS is managed by your Cloudflare account. Your ChatGPT account or workspace must allow custom MCP connections.
 
 Install the prerequisites from [Node.js](https://nodejs.org/en/download), [Git for Windows](https://git-scm.com/downloads/win), and [Cloudflare's downloads](https://developers.cloudflare.com/tunnel/downloads/). Keep Node on the **24.x** line for this release. Soft-HeartDevSpace installs its supported DevSpace engine from npm when you choose **Install DevSpace 1.0.8**.
@@ -49,7 +51,7 @@ The Windows ZIP includes the control panel and its Python runtime. Node.js, Git,
 
 ### 1. Open the Windows app
 
-Download `Soft-HeartDevSpace-0.1.0-windows-x64.zip` from [Releases](https://github.com/thekingofall/Soft-HeartDevSpace/releases/latest), extract the **entire folder**, and run `Soft-HeartDevSpace.exe`. Keep the adjacent `_internal` folder. The app opens a private control panel in your default browser.
+Download `Soft-HeartDevSpace-0.2.0-windows-x64.zip` from [Releases](https://github.com/thekingofall/Soft-HeartDevSpace/releases/latest), extract the **entire folder**, and run `Soft-HeartDevSpace.exe`. Keep the adjacent `_internal` folder. The app opens a private control panel in your default browser.
 
 Use the **中文 / English** button to change language. Open **Connection** and choose **Detect tools**. Install the DevSpace engine if it is missing or incompatible. Advanced settings let you select executable paths when automatic detection cannot find a tool.
 
@@ -126,7 +128,7 @@ Use **Activity** for recent heartbeat records. The local `logs` folder also cont
 
 ## Project and compatibility
 
-Soft-HeartDevSpace is an independent Windows companion to [Waishnav/DevSpace](https://github.com/Waishnav/DevSpace) and [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/). Version **0.1.0** targets **DevSpace 1.0.8 + Node.js 24**. Engine upgrades require compatibility testing, because configuration and tool behavior can change.
+Soft-HeartDevSpace is an independent Windows companion to [Waishnav/DevSpace](https://github.com/Waishnav/DevSpace) and [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/). Version **0.2.0** targets **DevSpace 1.0.8 + Node.js 24**. Engine upgrades require compatibility testing, because configuration and tool behavior can change.
 
 The overview illustration follows the clear panels and restrained palette of the author's [scFetallife_Blood](https://github.com/thekingofall/scFetallife_Blood) project. It is newly drawn for this software; its editable [R source](scripts/draw_overview.R) and [vector PDF](docs/images/connection-overview.pdf) are included.
 

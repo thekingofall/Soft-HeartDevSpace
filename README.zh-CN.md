@@ -39,6 +39,8 @@
 
 ## 使用前准备
 
+**0.2.0 新增 FRP 与双通道模式。** 配合自有 HTTPS 中转网关，Cloudflare 和 FRP 可以共用一个 ChatGPT 地址，并在连续健康检查失败后自动切换。控制台会显示当前线路。[FRP 配置指南](docs/FRP.zh-CN.md)包含服务器模板、证书、DNS 和恢复策略。下方继续介绍 Cloudflare 模式的首次配置。
+
 需要 **Windows 10/11 x64**、**Node.js 24 LTS**、**Git for Windows**、**cloudflared**，以及一个由 Cloudflare 管理 DNS 的域名。ChatGPT 账户或工作区需要允许使用自定义 MCP 连接。
 
 从 [Node.js 官网](https://nodejs.org/en/download)、[Git for Windows](https://git-scm.com/downloads/win) 和 [Cloudflare 下载页](https://developers.cloudflare.com/tunnel/downloads/)安装运行工具。本版本使用 **Node.js 24.x**。控制台中的“安装 DevSpace 1.0.8”会从 npm 安装已适配的引擎版本。
@@ -49,7 +51,7 @@ Windows 下载包包含控制台及其 Python 运行环境。Node.js、Git、clo
 
 ### 1. 打开软件
 
-在 [Releases](https://github.com/thekingofall/Soft-HeartDevSpace/releases/latest) 下载 `Soft-HeartDevSpace-0.1.0-windows-x64.zip`，**完整解压文件夹**，双击 `Soft-HeartDevSpace.exe`。请保留同目录中的 `_internal` 文件夹。软件会在默认浏览器中打开本机控制台。
+在 [Releases](https://github.com/thekingofall/Soft-HeartDevSpace/releases/latest) 下载 `Soft-HeartDevSpace-0.2.0-windows-x64.zip`，**完整解压文件夹**，双击 `Soft-HeartDevSpace.exe`。请保留同目录中的 `_internal` 文件夹。软件会在默认浏览器中打开本机控制台。
 
 右上角可以切换“中文 / English”。进入“连接设置”，点击“检测运行工具”；需要时点击“安装 DevSpace 1.0.8”。自动检测未找到工具时，可以展开高级设置，填写对应程序的完整路径。
 
@@ -126,7 +128,7 @@ DevSpace 提供文件操作和命令执行工具。命令以**当前 Windows 用
 
 ## 项目说明
 
-Soft-HeartDevSpace 是基于 [Waishnav/DevSpace](https://github.com/Waishnav/DevSpace) 与 [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) 的独立 Windows 连接管理软件。**0.1.0** 适配 **DevSpace 1.0.8 + Node.js 24**；引擎配置或工具行为发生变化时，需要重新验证兼容性。
+Soft-HeartDevSpace 是基于 [Waishnav/DevSpace](https://github.com/Waishnav/DevSpace) 与 [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) 的独立 Windows 连接管理软件。**0.2.0** 适配 **DevSpace 1.0.8 + Node.js 24**；引擎配置或工具行为发生变化时，需要重新验证兼容性。
 
 说明图参考作者 [scFetallife_Blood 胎儿血项目](https://github.com/thekingofall/scFetallife_Blood)的分区布局与柔和配色，为软件连接流程重新绘制。仓库提供可编辑的 [R 绘图源文件](scripts/draw_overview.R)和[矢量 PDF](docs/images/connection-overview.pdf)。
 

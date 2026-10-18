@@ -1,0 +1,12 @@
+[Unit]
+Description=DevSpace private FRP visitor
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=/opt/frp/frpc -c /etc/soft-heartdevspace/visitor.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+[Install]
+WantedBy=multi-user.target

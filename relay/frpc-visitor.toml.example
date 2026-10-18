@@ -1,0 +1,13 @@
+serverAddr = "127.0.0.1"
+serverPort = 7000
+auth.token = "REPLACE_SERVER_TOKEN"
+transport.tls.enable = true
+loginFailExit = false
+
+[[visitors]]
+name = "heartdevspace-visitor"
+type = "stcp"
+serverName = "heartdevspace-pc"
+secretKey = "REPLACE_WITH_RANDOM_PRIVATE_KEY"
+bindAddr = "127.0.0.1"
+bindPort = 17677

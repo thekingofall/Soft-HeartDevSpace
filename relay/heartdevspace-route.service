@@ -1,0 +1,8 @@
+[Unit]
+Description=DevSpace transport health and route selection
+After=network-online.target heartdevspace-visitor.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /etc/soft-heartdevspace/failover.py --config /etc/soft-heartdevspace/failover.json
+TimeoutStartSec=60
+UMask=0077

@@ -1,0 +1,17 @@
+serverAddr = "relay.example.com"
+serverPort = 7000
+auth.token = "REPLACE_SERVER_TOKEN"
+transport.tls.enable = true
+loginFailExit = false
+
+[[proxies]]
+name = "heartdevspace-pc"
+type = "stcp"
+secretKey = "REPLACE_WITH_RANDOM_PRIVATE_KEY"
+localIP = "127.0.0.1"
+localPort = 7676
+healthCheck.type = "http"
+healthCheck.path = "/healthz"
+healthCheck.intervalSeconds = 10
+healthCheck.timeoutSeconds = 3
+healthCheck.maxFailed = 3

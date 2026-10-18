@@ -25,6 +25,46 @@ class Fixture(unittest.TestCase):
 
 
 class ConfigTests(Fixture):
+    def test_sidecar_reload_preserves_external_engine_configuration(self):
+        external = self.home / 'external-engine'
+        write_json(external / 'config.json', {'allowedRoots': ['fixture-original']})
+        self.manager.settings.update(external_engine=True, config_dir=str(external),
+                                     state_dir=str(self.home / 'external-state'))
+        self.manager.persist()
+        reloaded = Manager(self.manager.home)
+        self.assertEqual(reloaded.settings['config_dir'], str(external))
+        self.assertEqual(reloaded.settings['state_dir'], str(self.home / 'external-state'))
+        with self.assertRaisesRegex(ValueError, 'externally managed'):
+            reloaded.write_service_config()
+        self.assertEqual(read_json(external / 'config.json')['allowedRoots'], ['fixture-original'])
+
+    def frp_payload(self):
+        config = self.home / 'frpc.toml'
+        config.write_text('transport.tls.enable=true\n[[proxies]]\nname="test"\ntype="stcp"\nsecretKey="private-fixture"\nlocalIP="127.0.0.1"\nlocalPort=17776\n', encoding='utf-8')
+        return self.payload() | dict(connection_mode='dual', cloudflare_hostname='cf.example.com',
+                                    frpc_path=str(config), frpc_config=str(config))
+
+    def test_dual_requires_separate_origin_and_matching_port(self):
+        payload = self.frp_payload()
+        for changes in ({'cloudflare_hostname': ''}, {'cloudflare_hostname': 'dev.example.com'}, {'port': 17777}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.manager.save(payload | changes)
+        self.manager.save(payload)
+        self.assertNotIn('private-fixture', json.dumps(self.manager.snapshot()))
+        self.manager.settings.update(tunnel_id='fixture', credentials_path='fixture.json')
+        self.manager.write_service_config()
+        content = (self.manager.home / 'tunnel.yml').read_text()
+        self.assertIn('hostname: "cf.example.com"', content)
+        self.assertIn('httpHostHeader: "dev.example.com"', content)
+
+    def test_frp_config_cannot_include_other_services(self):
+        payload = self.frp_payload()
+        path = Path(payload['frpc_config'])
+        with path.open('a') as handle:
+            handle.write('[[proxies]]\nname="other"\ntype="tcp"\nlocalPort=22\n')
+        with self.assertRaises(ValueError):
+            self.manager.save(payload)
+
     def test_domain_normalization(self):
         self.assertEqual(normalize_domain("HTTPS://DEV.EXAMPLE.COM/"), "dev.example.com")
 

@@ -13,3 +13,5 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - shell: powershell
         run: ./tests/test_recovery.ps1
+      - shell: powershell
+        run: python -m tests.windows_quiet --home "$env:RUNNER_TEMP\heart-quiet-test"

@@ -5,6 +5,8 @@ of their respective owners. No affiliation or endorsement is implied.
 External runtime tools, installed separately:
 - DevSpace / @waishnav/devspace 1.0.8: https://github.com/Waishnav/DevSpace
 - cloudflared: https://github.com/cloudflare/cloudflared
+- FRP / frpc and frps: https://github.com/fatedier/frp (Apache-2.0)
+- nginx: https://nginx.org (BSD-2-Clause)
 - Node.js: https://nodejs.org
 - Git for Windows: https://gitforwindows.org
 Their licenses apply to their respective distributions.

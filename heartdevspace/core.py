@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import tomllib
 import uuid
 from urllib.parse import urlsplit
 
@@ -77,12 +79,13 @@ def detect_dependencies(home: Path) -> dict:
     git = shutil.which("git")
     bash = _first_file([Path(git).parent.parent / "bin/bash.exe" if git else None, program / "Git/bin/bash.exe"])
     cloud = _first_file([shutil.which("cloudflared"), *local.glob("Microsoft/WinGet/Packages/Cloudflare.cloudflared_*/cloudflared.exe")])
+    frpc = _first_file([shutil.which("frpc"), home / "tools/frpc.exe"])
     cli = _first_file([home / "engine/node_modules/@waishnav/devspace/dist/cli.js",
                        roaming / "npm/node_modules/@waishnav/devspace/dist/cli.js"])
     version = ""
     if cli:
         version = read_json(Path(cli).parent.parent / "package.json", {}).get("version", "")
-    return {"node_path": node, "bash_path": bash, "cloudflared_path": cloud, "devspace_cli": cli,
+    return {"node_path": node, "bash_path": bash, "cloudflared_path": cloud, "frpc_path": frpc, "devspace_cli": cli,
             "engine_version": version, "engine_compatible": version == DEVSPACE_VERSION}
 
 
@@ -100,6 +103,9 @@ class Manager:
                              "port": 7676, "metrics_port": 20251, "allowed_roots": [], "enabled": False,
                              "language": "en", **detect_dependencies(self.home)}
             self.persist()
+        for key, value in dict(connection_mode="cloudflare", cloudflare_hostname="", frpc_config="", frpc_path="").items():
+            self.settings.setdefault(key, value)
+        self.persist()
         self.deploy_runtime()
 
     @property
@@ -107,20 +113,31 @@ class Manager:
         return "Soft-HeartDevSpace-" + self.settings["instance_id"]
 
     def persist(self):
-        self.settings.update({"home": str(self.home), "config_dir": str(self.home / "devspace"),
-                              "state_dir": str(self.home / "devspace-state"), "log_dir": str(self.home / "logs"),
+        for name, folder in (("config_dir", "devspace"), ("state_dir", "devspace-state")):
+            if not self.settings.get("external_engine") or not self.settings.get(name):
+                self.settings[name] = str(self.home / folder)
+        self.settings.update({"home": str(self.home), "log_dir": str(self.home / "logs"),
                               "tunnel_config": str(self.home / "tunnel.yml"), "heartbeat_seconds": 30})
         write_json(self.path, self.settings)
 
     def deploy_runtime(self):
         runtime = self.home / "runtime"
         runtime.mkdir(exist_ok=True)
-        for name in ("watch.ps1", "control.ps1"):
+        for name in ("watch.ps1", "control.ps1", "quiet-launcher.cs"):
             src, dest = PACKAGE / "runtime" / name, runtime / name
             if not dest.exists() or dest.read_bytes() != src.read_bytes():
                 stage = dest.with_suffix(".new")
                 shutil.copyfile(src, stage)
                 os.replace(stage, dest)
+        source = runtime / "quiet-launcher.cs"
+        executable = runtime / ("quiet-launcher-" + hashlib.sha256(source.read_bytes()).hexdigest()[:12] + ".exe")
+        if os.name == "nt" and not executable.exists():
+            compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+            stage = runtime / "quiet-launcher.new.exe"
+            hidden_run([str(compiler), "/nologo", "/target:winexe", "/out:" + str(stage), str(source)])
+            os.replace(stage, executable)
+        self.settings["quiet_launcher"] = str(executable)
+        self.persist()
 
     def snapshot(self):
         with self.lock:
@@ -137,6 +154,14 @@ class Manager:
                 raise ValueError("Stop the connection before changing its settings.")
             candidate = dict(self.settings)
             candidate["domain"] = normalize_domain(str(payload.get("domain", "")))
+            mode = payload.get("connection_mode", candidate["connection_mode"])
+            if mode not in ("cloudflare", "frp", "dual"):
+                raise ValueError("Choose Cloudflare, FRP, or dual transport.")
+            candidate["connection_mode"] = mode
+            origin = str(payload.get("cloudflare_hostname", candidate["cloudflare_hostname"])).strip()
+            candidate["cloudflare_hostname"] = normalize_domain(origin) if origin else ""
+            if mode == "dual" and (not origin or candidate["cloudflare_hostname"] == candidate["domain"]):
+                raise ValueError("Dual transport requires a separate Cloudflare origin hostname, for example cf-dev.example.com.")
             name = str(payload.get("tunnel_name", "heartdevspace")).strip()
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}", name):
                 raise ValueError("Tunnel name must contain letters, numbers, underscores, or hyphens.")
@@ -159,11 +184,13 @@ class Manager:
                 candidate[name] = val
             if candidate["port"] == candidate["metrics_port"]:
                 raise ValueError("Service and health ports must be different.")
-            for name in ("node_path", "bash_path", "cloudflared_path", "devspace_cli"):
+            for name in ("node_path", "bash_path", "cloudflared_path", "devspace_cli", "frpc_path", "frpc_config"):
                 val = str(payload.get(name, candidate.get(name, ""))).strip()
                 if val and not Path(val).is_file():
                     raise ValueError(f"File does not exist: {val}")
                 candidate[name] = val
+            if mode in ("frp", "dual"):
+                self.validate_frp(candidate)
             candidate["language"] = payload.get("language", "en") if payload.get("language") in ("en", "zh") else "en"
             # A tunnel name change requires a new explicit create/connect operation.
             if candidate["tunnel_name"] != self.settings["tunnel_name"]:
@@ -174,8 +201,24 @@ class Manager:
             self.write_service_config()
         return "Settings saved."
 
+    @staticmethod
+    def validate_frp(settings):
+        if not settings.get("frpc_path") or not settings.get("frpc_config"):
+            raise ValueError("Choose frpc.exe and a private STCP client TOML file.")
+        data = tomllib.loads(Path(settings["frpc_config"]).read_text(encoding="utf-8-sig"))
+        proxies = data.get("proxies", [])
+        if data.get("visitors") or len(proxies) != 1:
+            raise ValueError("Use a dedicated FRP config with one DevSpace STCP proxy.")
+        proxy = proxies[0]
+        if proxy.get("type") != "stcp" or proxy.get("localIP", "127.0.0.1") != "127.0.0.1" or proxy.get("localPort") != settings["port"]:
+            raise ValueError("The STCP proxy must point to this DevSpace loopback port.")
+        if not proxy.get("secretKey") or data.get("transport", {}).get("tls", {}).get("enable") is not True:
+            raise ValueError("FRP requires an STCP secret key and enabled TLS.")
+
     def write_service_config(self):
         s = self.settings
+        if s.get("external_engine"):
+            raise ValueError("This transport sidecar uses an externally managed DevSpace configuration.")
         if not s["domain"] or not s["allowed_roots"]:
             raise ValueError("Save a hostname and project folders first.")
         config_dir = Path(s["config_dir"])
@@ -190,7 +233,8 @@ class Manager:
             q = json.dumps
             text = (f"protocol: http2\ntunnel: {q(s['tunnel_id'])}\ncredentials-file: {q(s['credentials_path'])}\n"
                     f"metrics: 127.0.0.1:{s['metrics_port']}\ningress:\n"
-                    f"  - hostname: {q(s['domain'])}\n    service: http://127.0.0.1:{s['port']}\n"
+                    f"  - hostname: {q(s['cloudflare_hostname'] or s['domain'])}\n    service: http://127.0.0.1:{s['port']}\n"
+                    f"    originRequest:\n      httpHostHeader: {q(s['domain'])}\n"
                     "  - service: http_status:404\n")
             target = self.home / "tunnel.yml"
             stage = target.with_suffix(".new")
@@ -273,16 +317,21 @@ class Manager:
             s.update(tunnel_id=tunnel_id, credentials_path=str(credential))
             self.persist()
             self.write_service_config()
-            hidden_run([exe, "--config", str(self.home / "tunnel.yml"), "tunnel", "route", "dns", tunnel_id, s["domain"]], timeout=60)
+            hidden_run([exe, "--config", str(self.home / "tunnel.yml"), "tunnel", "route", "dns", tunnel_id, s["cloudflare_hostname"] or s["domain"]], timeout=60)
             return "Tunnel and DNS hostname are ready."
         if action == "start":
             if self.settings["enabled"]:
                 return "Heartbeat is already enabled."
             self.ensure_engine()
             self.write_service_config()
-            if not self.settings.get("tunnel_id") or not Path(self.settings.get("credentials_path", "")).is_file():
+            mode = self.settings["connection_mode"]
+            if mode != "frp" and (not self.settings.get("tunnel_id") or not Path(self.settings.get("credentials_path", "")).is_file()):
                 raise ValueError("Create the tunnel and DNS route first.")
-            for port in (self.settings["port"], self.settings["metrics_port"]):
+            if mode in ("frp", "dual"):
+                self.validate_frp(self.settings)
+                hidden_run([self.settings["frpc_path"], "verify", "-c", self.settings["frpc_config"]])
+            ports = [self.settings["port"]] + ([self.settings["metrics_port"]] if mode != "frp" else [])
+            for port in ports:
                 with socket.socket() as probe:
                     probe.settimeout(0.5)
                     if probe.connect_ex(("127.0.0.1", port)) == 0:

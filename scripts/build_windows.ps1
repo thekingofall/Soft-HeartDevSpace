@@ -13,6 +13,11 @@ try {
     & $Python -m PyInstaller --noconfirm --clean --onedir --windowed --name Soft-HeartDevSpace --add-data $webData --add-data $runtimeData --workpath $work --specpath $spec --distpath $dist launch.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
     foreach ($name in @('README.md','README.zh-CN.md','LICENSE','NOTICE','docs')) { Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $dist 'Soft-HeartDevSpace') -Recurse -Force }
+    $relayDir=Join-Path $dist 'Soft-HeartDevSpace\relay'
+    New-Item -ItemType Directory -Path $relayDir -Force | Out-Null
+    foreach ($name in @('failover.py','failover.json.example','frpc-source.toml.example','frpc-visitor.toml.example','gateway.conf.example','heartdevspace-route.service','heartdevspace-route.timer','heartdevspace-visitor.service.example')) {
+        Copy-Item -LiteralPath (Join-Path $repo ('relay\'+$name)) -Destination $relayDir
+    }
     $pythonBase = & $Python -c 'import sys; print(sys.base_prefix)'
     Copy-Item -LiteralPath (Join-Path $pythonBase 'LICENSE.txt') -Destination (Join-Path $dist 'Soft-HeartDevSpace\PYTHON-LICENSE.txt')
     $logoDir=Join-Path $dist 'Soft-HeartDevSpace\heartdevspace\web'
@@ -21,7 +26,7 @@ try {
     $sourceDir=Join-Path $dist 'Soft-HeartDevSpace\scripts'
     New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repo 'scripts\draw_overview.R') -Destination $sourceDir
-    Compress-Archive -Path (Join-Path $dist 'Soft-HeartDevSpace') -DestinationPath (Join-Path $dist 'Soft-HeartDevSpace-0.1.0-windows-x64.zip') -Force
-    $archive=Join-Path $dist 'Soft-HeartDevSpace-0.1.0-windows-x64.zip'
+    Compress-Archive -Path (Join-Path $dist 'Soft-HeartDevSpace') -DestinationPath (Join-Path $dist 'Soft-HeartDevSpace-0.2.0-windows-x64.zip') -Force
+    $archive=Join-Path $dist 'Soft-HeartDevSpace-0.2.0-windows-x64.zip'
     ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower() + '  ' + (Split-Path $archive -Leaf)) | Set-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt') -Encoding ASCII
 } finally { Pop-Location }

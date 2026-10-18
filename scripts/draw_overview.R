@@ -42,12 +42,12 @@ draw <- function() {
   x <- c(.16,.407,.638,.855)
   folder(x[1],.81,c$blue);server_icon(x[2],.81,c$purple);cloud(x[3],.81,c$gold);chat(x[4],.81,c$teal)
   for (i in 1:4) {
-    txt(c('Project folders','DevSpace','HTTPS tunnel','ChatGPT')[i],x[i],.728,17,c$ink,2)
+    txt(c('Project folders','DevSpace','HTTPS gateway','ChatGPT')[i],x[i],.728,17,c$ink,2)
     txt(c('Files and commands','MCP + OAuth','dev.example.com','Your approved client')[i],x[i],.676,12,c$muted)
   }
   for (i in 1:3) arrow_line(x[i]+.077,.806,x[i+1]-.073,.806)
   txt('Windows account permissions',.285,.585,11,c$muted)
-  txt('Cloudflare Tunnel',.638,.585,11,c$muted)
+  txt('Cloudflare + FRP',.638,.585,11,c$muted)
   txt('Connect / authorize',.855,.585,11,c$muted)
   # Heartbeat path supervises service, tunnel, and public endpoint.
   grid.lines(c(.407,.407,.855,.855),c(.542,.487,.487,.542),gp=gpar(col=c$teal,lwd=2))
@@ -69,7 +69,7 @@ draw <- function() {
   txt('Add the HTTPS /mcp URL\nSelect OAuth in ChatGPT\nApprove on your own domain',bx[2],.254,14)
   txt('Credentials stored locally',bx[2],.112,11,c$muted)
   txt('Recover quietly',bx[3]-.063,.365,17,c$ink,2,'left')
-  txt('Check service + tunnel + URL\nRestart failed components\nResume after Windows sign-in',bx[3],.254,14)
+  txt('Check both transport paths\nSwitch routes and recover\nResume after Windows sign-in',bx[3],.254,14)
   txt('Startup grace + retry cooldowns',bx[3],.112,11,c$muted)
 }
 setwd(out) # Relative filenames also work with Windows Cairo in Unicode directories.
